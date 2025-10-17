@@ -20,7 +20,10 @@ It’s recommended to save these variables in a local `.env` file and use `sourc
 
 Both, either or neither can be used at the same time. To turn off the parameter, input "-1" as its value.
 
-3. Start the container:
+3. List images which you would like to preserve from being deleted:
+- `SKIP_TAGS_FILE`  - Variable holding the name of the file holding the list of the images not to be deleted (also note the file being mentioned in `volumes`)
+
+4. Start the container:
 ```bash
 docker compose up -d
 ```

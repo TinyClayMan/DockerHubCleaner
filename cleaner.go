@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -110,12 +112,37 @@ func sumSize(tags []Tag) int64 {
 	return total
 }
 
+// Load skip list from file (one tag per line)
+func loadSkipList(filename string) (map[string]struct{}, error) {
+	skip := make(map[string]struct{})
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return skip, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		tag := strings.TrimSpace(scanner.Text())
+		if tag != "" {
+			skip[tag] = struct{}{}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return skip, err
+	}
+
+	return skip, nil
+}
+
 func main() {
 	user := os.Getenv("DOCKER_USERNAME")
 	password := os.Getenv("DOCKER_PASSWORD")
 	repo := os.Getenv("DOCKER_REPOSITORY")
 	keepCountStr := os.Getenv("KEEP_COUNT")
 	maxSizeStr := os.Getenv("MAX_SIZE_MB")
+	skipFile := os.Getenv("SKIP_TAGS_FILE")
 
 	if user == "" || password == "" || repo == "" {
 		log.Fatal("Missing required environment variables: DOCKER_USERNAME, DOCKER_PASSWORD, DOCKER_REPOSITORY")
@@ -129,7 +156,7 @@ func main() {
 			log.Fatalf("Invalid KEEP_COUNT value: %s", keepCountStr)
 		}
 	} else {
-		keepCount = -1 // not enforced
+		keepCount = -1
 	}
 
 	var maxSizeMB int64 = -1
@@ -138,6 +165,16 @@ func main() {
 		if err != nil {
 			log.Fatalf("Invalid MAX_SIZE_MB value: %s", maxSizeStr)
 		}
+	}
+
+	// Load skip list if provided
+	skipTags := make(map[string]struct{})
+	if skipFile != "" {
+		skipTags, err = loadSkipList(skipFile)
+		if err != nil {
+			log.Fatalf("Failed to load skip list file: %v", err)
+		}
+		fmt.Printf("Loaded %d protected tags from %s\n", len(skipTags), skipFile)
 	}
 
 	// Authenticate
@@ -161,6 +198,10 @@ func main() {
 	if keepCount >= 0 && len(tags) > keepCount {
 		toDelete := tags[keepCount:]
 		for _, t := range toDelete {
+			if _, ok := skipTags[t.Name]; ok {
+				fmt.Println("Skipping protected tag:", t.Name)
+				continue
+			}
 			fmt.Println("Deleting (exceeds count):", t.Name)
 			if err := deleteTag(user, repo, t.Name, token); err != nil {
 				log.Println("Error deleting:", t.Name, err)
@@ -173,7 +214,14 @@ func main() {
 	if maxSizeMB > 0 {
 		for sumSize(tags) > maxSizeMB*1024*1024 && len(tags) > 0 {
 			oldest := tags[len(tags)-1]
-			fmt.Printf("Deleting (exceeds size, total=%.2fMB): %s\n", float64(sumSize(tags))/(1024*1024), oldest.Name)
+			if _, ok := skipTags[oldest.Name]; ok {
+				fmt.Println("Skipping protected tag:", oldest.Name)
+				// if skipping, just move to next oldest
+				tags = tags[:len(tags)-1]
+				continue
+			}
+			fmt.Printf("Deleting (exceeds size, total=%.2fMB): %s\n",
+				float64(sumSize(tags))/(1024*1024), oldest.Name)
 			if err := deleteTag(user, repo, oldest.Name, token); err != nil {
 				log.Println("Error deleting:", oldest.Name, err)
 			}

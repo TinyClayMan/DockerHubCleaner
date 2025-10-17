@@ -4,10 +4,13 @@ services:
   docker-cleanup:
     build: .
     container_name: docker_cleanup
+    restart: "no"  # run once, then stop
     environment:
       DOCKER_USERNAME: "${HUB_LOGIN}"
       DOCKER_PASSWORD: "${HUB_PASSWORD}" # or token
       DOCKER_REPOSITORY: "${HUB_REPO_NAME}"
       KEEP_COUNT: "-1"       # optional, -1 if not needed
       MAX_SIZE_MB: "71680"     # optional, -1 if not needed
-    restart: "no"  # run once, then stop
+      SKIP_TAGS_FILE: "/app/skip_tags.txt"
+    volumes:
+       - ./skip_tags.txt:/app/skip_tags.txt
